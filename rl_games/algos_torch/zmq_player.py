@@ -23,6 +23,8 @@ class PpoPlayerContinuousZmq(BasePlayer):
         
         #fw-overrides 
         self.is_determenistic = True
+        self.env.task.cfg["zmq"] = True
+
         #cfg["env"]["numEnvs"] = args.num_envs
 
         self.zmq_context = zmq.Context()
@@ -103,7 +105,9 @@ class PpoPlayerContinuousZmq(BasePlayer):
                 message      = self.zmq_socket.recv()
                 zmq_obs_data = np.frombuffer(message, dtype=np.float32)
 
-                zmq_obs_tensor = torch.from_numpy(zmq_obs_data).to(self.device)
+                zmq_obs_tensor = self.env.task.adapt_zmq_observation(zmq_obs_data)
+
+                #zmq_obs_tensor = torch.from_numpy(zmq_obs_data).to(self.device)
                 #zmq_obs_tensor = torch.tensor(zmq_obs_data)
 
                 if has_masks:
@@ -112,16 +116,21 @@ class PpoPlayerContinuousZmq(BasePlayer):
                 else:
                     action = self.get_action(zmq_obs_tensor, is_determenistic)
                 #obses, r, done, info = self.env_step(self.env, action)
-                
-                action_rads = self.env.task.rescale_action(action)
-                action_np   = np.array(action_rads.cpu(), dtype=np.float32)
+
+                # (-1,1)->rads->filtered rads
+                action_adapt = self.env.task.adapt_zmq_actions(action) 
+
+                action_np    = np.array(action_adapt.cpu(), dtype=np.float32)
 
                 self.zmq_socket.send(action_np.tobytes())
+
 
                 # update sim state if we're rendering
                 if render:
                     self.env.task.shadow_zmp_observations(zmq_obs_tensor)
                     self.env.task.gym.simulate(self.env.task.sim)
+            else:
+                self.env.task.zmq_idle()
 
             if render:
                 self.env.task.render()
